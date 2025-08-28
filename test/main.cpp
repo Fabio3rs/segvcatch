@@ -12,9 +12,12 @@ void handle_segv() { throw std::runtime_error("My SEGV"); }
 
 void handle_fpe() { throw std::runtime_error("My FPE"); }
 
+void handle_sigill() { throw std::runtime_error("My SIGILL"); }
+
 TEST(Segvcatch, InitSegv) {
     segvcatch::init_segv(nullptr);
     segvcatch::init_fpe(nullptr);
+    segvcatch::init_sigill(nullptr);
 
     try {
         /*
@@ -36,6 +39,15 @@ TEST(Segvcatch, InitSegv) {
 #ifndef __ARM_ARCH // TODO
         test::divide_by_zero();
 #endif
+    } catch (const segvcatch::hardware_exception &e) {
+        std::cerr << "Exception catched : " << e.what()
+                  << " where: " << e.info.addr << std::endl;
+    } catch (std::exception &e) {
+        std::cerr << "Exception catched : " << e.what() << std::endl;
+    }
+
+    try {
+        test::causes_sigill();
     } catch (const segvcatch::hardware_exception &e) {
         std::cerr << "Exception catched : " << e.what()
                   << " where: " << e.info.addr << std::endl;

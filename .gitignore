@@ -1,0 +1,11 @@
+build/
+.cache
+*.o
+*.so
+*.dSYM
+*.log
+*.tmp
+*.out
+*.exe
+
+
