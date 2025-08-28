@@ -51,4 +51,14 @@ class interrupted_by_the_user : public hardware_exception {
         : hardware_exception(what_arg, info) {}
 };
 
+class illegal_instruction : public hardware_exception {
+  public:
+    illegal_instruction(const std::string &what_arg)
+        : hardware_exception(what_arg) {}
+
+    illegal_instruction(const std::string &what_arg,
+                        hardware_exception_info info) noexcept
+        : hardware_exception(what_arg, info) {}
+};
+
 } // namespace segvcatch

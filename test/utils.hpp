@@ -3,4 +3,5 @@
 namespace test {
 void causes_segv();
 void divide_by_zero();
+void causes_sigill();
 } // namespace test

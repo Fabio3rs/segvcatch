@@ -33,6 +33,7 @@ namespace {
 segvcatch::handler handler_segv = 0;
 segvcatch::handler handler_ctrlc = 0;
 segvcatch::handler handler_fpe = 0;
+segvcatch::handler handler_sigill = 0;
 
 #if defined __GNUC__ && __linux
 
@@ -58,6 +59,10 @@ void default_fpe(const segvcatch::hardware_exception_info &info) {
     throw segvcatch::floating_point_error("Floating point error", info);
 }
 
+void default_sigill(const segvcatch::hardware_exception_info &info) {
+    throw segvcatch::illegal_instruction("Illegal instruction", info);
+}
+
 void handle_segv(const segvcatch::hardware_exception_info &info) {
     if (handler_segv)
         handler_segv(info);
@@ -73,7 +78,12 @@ void handle_ctrlc(const segvcatch::hardware_exception_info &info) {
         handler_ctrlc(info);
 }
 
-#if defined(HANDLE_SEGV) || defined(HANDLE_FPE)
+void handle_sigill(const segvcatch::hardware_exception_info &info) {
+    if (handler_sigill)
+        handler_sigill(info);
+}
+
+#if defined(HANDLE_SEGV) || defined(HANDLE_FPE) || defined(HANDLE_SIGILL)
 
 #include <execinfo.h>
 
@@ -158,6 +168,8 @@ static void call_handle_fpe() { handle_fpe(hwinfo); }
 
 static void call_handle_ctrlc() { handle_ctrlc(hwinfo); }
 
+static void call_handle_sigill() { handle_sigill(hwinfo); }
+
 static void __attribute__((naked)) in_context_signal_handler() {
     // save return address
     asm("push %0\n\n" : "=m"(retnptr) : : "memory");
@@ -184,6 +196,16 @@ static void __attribute__((naked)) in_context_signal_handler_fpe() {
 
     // call _handle_segv
     asm("jmp *%0" : : "r"(call_handle_fpe) : "memory");
+
+    asm("int $3\n");
+}
+
+static void __attribute__((naked)) in_context_signal_handler_sigill() {
+    // save return address
+    asm("push %0\n\n" : "=m"(retnptr) : : "memory");
+
+    // call _handle_sigill
+    asm("jmp *%0" : : "r"(call_handle_sigill) : "memory");
 
     asm("int $3\n");
 }
@@ -278,6 +300,50 @@ SIGNAL_HANDLER(catch_fpe) {
 #endif
 #endif
 
+#ifdef HANDLE_SIGILL
+#ifdef __ARM_ARCH
+
+static void call_handle_sigill() { handle_sigill(hwinfo); }
+
+static void __attribute__((naked)) in_context_signal_handler_sigill_arm() {
+    // save return address
+    asm("ldr r0, %0\npush {r0}\n" : "=m"(retnptr) : : "memory");
+
+    // call _handle_sigill
+    asm("mov pc, %0" : : "r"(call_handle_sigill) : "memory");
+}
+
+SIGNAL_HANDLER(catch_sigill) {
+    unblock_signal(SIGILL);
+    MAKE_THROW_FRAME(nullp);
+    ucontext_t *context = (ucontext_t *)_p;
+
+#ifdef __aarch64__
+    retnptr = context->uc_mcontext.pc;
+    context->uc_mcontext.pc = (uintptr_t)in_context_signal_handler_sigill_arm;
+#else
+    retnptr = reinterpret_cast<void *>(context->uc_mcontext.arm_pc);
+    context->uc_mcontext.arm_pc =
+        (uintptr_t)in_context_signal_handler_sigill_arm;
+#endif
+
+    hwinfo.addr = retnptr;
+}
+#else
+SIGNAL_HANDLER(catch_sigill) {
+    unblock_signal(SIGILL);
+    MAKE_THROW_FRAME(nullp);
+    ucontext_t *context = (ucontext_t *)_p;
+
+    hwinfo.addr = (void *)context->uc_mcontext.gregs[REG_RIP];
+
+    retnptr = (void *)context->uc_mcontext.gregs[REG_RIP];
+    context->uc_mcontext.gregs[REG_RIP] =
+        (greg_t)in_context_signal_handler_sigill;
+}
+#endif
+#endif
+
 #ifdef WIN32
 #include <windows.h>
 
@@ -288,6 +354,10 @@ static LONG CALLBACK win32_exception_handler(LPEXCEPTION_POINTERS e) {
     } else if (e->ExceptionRecord->ExceptionCode ==
                EXCEPTION_INT_DIVIDE_BY_ZERO) {
         handle_fpe();
+        return EXCEPTION_CONTINUE_EXECUTION;
+    } else if (e->ExceptionRecord->ExceptionCode ==
+               EXCEPTION_ILLEGAL_INSTRUCTION) {
+        handle_sigill();
         return EXCEPTION_CONTINUE_EXECUTION;
     } else
         return EXCEPTION_CONTINUE_SEARCH;
@@ -324,6 +394,20 @@ void init_fpe(handler h) {
         handler_fpe = default_fpe;
 #ifdef HANDLE_FPE
     INIT_FPE;
+#endif
+
+#ifdef WIN32
+    SetUnhandledExceptionFilter(win32_exception_handler);
+#endif
+}
+
+void init_sigill(handler h) {
+    if (h)
+        handler_sigill = h;
+    else
+        handler_sigill = default_sigill;
+#ifdef HANDLE_SIGILL
+    INIT_SIGILL;
 #endif
 
 #ifdef WIN32
